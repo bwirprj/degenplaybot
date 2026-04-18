@@ -7,7 +7,7 @@ const RPC_URL = config.solana.heliusRpcUrl || 'https://api.mainnet-beta.solana.c
 const connection = new Connection(RPC_URL, 'confirmed');
 
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdqYm1zoThtU4t977M8XfD1sT4k7p8QToDj');
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 
 class SolanaService {
   /**

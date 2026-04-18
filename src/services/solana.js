@@ -1,4 +1,5 @@
 const { Connection, PublicKey } = require('@solana/web3.js');
+const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
 
@@ -6,49 +7,60 @@ const logger = require('../utils/logger');
 const RPC_URL = config.solana.heliusRpcUrl || 'https://api.mainnet-beta.solana.com';
 const connection = new Connection(RPC_URL, 'confirmed');
 
-const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
-
 class SolanaService {
   /**
-   * Get all SPL token balances (Legacy & Token-2022) for a wallet.
+   * Get all assets (Tokens & NFTs) using Helius DAS API.
+   * Returns metadata (symbol, name) + balance.
    */
-  async getSPLTokenBalances(walletAddress) {
+  async getAssetsByOwner(walletAddress) {
     try {
-      const pubkey = new PublicKey(walletAddress);
-      
-      // Fetch both standard and 2022 tokens
-      const [legacyData, data2022] = await Promise.all([
-        connection.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ID }),
-        connection.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_2022_PROGRAM_ID })
-      ]);
-
-      const tokens = [];
-      const processAccounts = (data) => {
-        data.value.forEach((accountInfo) => {
-          const parsedInfo = accountInfo.account.data.parsed.info;
-          const mintAddress = parsedInfo.mint;
-          const amount = parsedInfo.tokenAmount.uiAmountString;
-          const decimals = parsedInfo.tokenAmount.decimals;
-
-          if (parseFloat(amount) > 0) {
-            tokens.push({
-              token_address: mintAddress,
-              balance: amount,
-              decimals: decimals
-            });
+      // Helius DAS API is accessible via POST to the RPC URL
+      const response = await axios.post(RPC_URL, {
+        jsonrpc: '2.0',
+        id: 'portfolio-fetch',
+        method: 'getAssetsByOwner',
+        params: {
+          ownerAddress: walletAddress,
+          page: 1,
+          limit: 100,
+          displayOptions: {
+            showFungible: true,
+            showNativeBalance: true
           }
-        });
-      };
+        }
+      });
 
-      processAccounts(legacyData);
-      processAccounts(data2022);
-      
+      const items = response.data?.result?.items || [];
+      const tokens = [];
+
+      items.forEach(item => {
+        // We focus on fungible tokens (SPL) and Token-2022
+        const isFungible = item.interface === 'FungibleToken' || item.interface === 'FungibleAsset';
+        const balanceInfo = item.token_info || {};
+        const balance = balanceInfo.balance / Math.pow(10, balanceInfo.decimals || 0);
+
+        if (isFungible && balance > 0) {
+          tokens.push({
+            token_address: item.id,
+            symbol: item.content?.metadata?.symbol || item.token_info?.symbol || 'Unknown',
+            name: item.content?.metadata?.name || 'Unknown Token',
+            balance: balance,
+            decimals: balanceInfo.decimals,
+            price: item.token_info?.price_info?.price_per_token || 0
+          });
+        }
+      });
+
       return tokens;
     } catch (error) {
-      logger.error('Solana RPC getSPLTokenBalances error:', error.message);
+      logger.error('Helius DAS getAssetsByOwner error:', error.message);
       return [];
     }
+  }
+
+  // Keep for legacy code compatibility if needed, but redirects to DAS
+  async getSPLTokenBalances(walletAddress) {
+    return this.getAssetsByOwner(walletAddress);
   }
 
   /**

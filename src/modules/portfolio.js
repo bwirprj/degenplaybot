@@ -14,30 +14,33 @@ class PortfolioModule {
   async run(walletAddress, chatId) {
     logger.info(`Starting portfolio check for ${walletAddress}`);
     try {
-      // 1. Fetch holdings (RPC + GMGN)
-      const [gmgnHoldings, rpcTokens] = await Promise.all([
-        gmgnService.getWalletHoldings(walletAddress),
-        solanaService.getSPLTokenBalances(walletAddress)
-      ]);
+      // 1. Fetch assets using Helius DAS (Lead source for balance/metadata)
+      const assets = await solanaService.getAssetsByOwner(walletAddress);
 
-      if (!gmgnHoldings || gmgnHoldings.length === 0) {
-        logger.info('No holdings found on GMGN.');
+      if (!assets || assets.length === 0) {
+        logger.info('No holdings found via Helius DAS.');
         return;
       }
 
+      // Optional: Still try GMGN for PnL data
+      let gmgnHoldings = [];
+      try {
+        gmgnHoldings = await gmgnService.getWalletHoldings(walletAddress);
+      } catch (e) {
+        logger.warn('GMGN Holdings fetch failed during cron, using DAS metadata.');
+      }
+
       // 2. Iterate each token
-      for (const holding of gmgnHoldings) {
-        // Find accurate balance from RPC
-        const onChain = rpcTokens.find(r => r.token_address === holding.token_address);
-        const accurateBalance = onChain ? parseFloat(onChain.balance) : holding.balance;
-        const accurateUsdValue = onChain ? (accurateBalance * (holding.price || 0)) : (holding.usd_value || 0);
-
+      for (const holding of assets) {
+        const gmgnInfo = gmgnHoldings.find(h => h.token_address === holding.token_address);
+        
         // Skip tiny dust
-        if (accurateUsdValue < 1) continue;
+        if ((holding.balance * (holding.price || 0)) < 1) continue;
 
-        // Update holding object for formatter
-        holding.balance = accurateBalance;
-        holding.usd_value = accurateUsdValue;
+        // Enrich with GMGN PnL if available
+        if (gmgnInfo) {
+          holding.unrealized_pnl_pct = gmgnInfo.unrealized_pnl_pct;
+        }
 
         const tokenAddress = holding.token_address;
         

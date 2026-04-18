@@ -1,4 +1,5 @@
 const gmgnService = require('../services/gmgn');
+const dexscreenerService = require('../services/dexscreener');
 const geckoTerminalService = require('../services/geckoterminal');
 const okxService = require('../services/okx');
 const { stochRSI } = require('../indicators/stochRSI');
@@ -14,9 +15,16 @@ class ScannerModule {
     logger.info(`Starting scanner run`);
     try {
       // 1. Get filtered tokens
-      const candidates = await gmgnService.scanTokens();
+      let candidates = await gmgnService.scanTokens();
+      
+      // Fallback to DexScreener if GMGN fails or returns nothing
       if (!candidates || candidates.length === 0) {
-        logger.info('No candidate tokens found in this scan cycle.');
+        logger.info('GMGN scanner failed or empty. Falling back to DexScreener trending...');
+        candidates = await dexscreenerService.getTrendingTokens();
+      }
+
+      if (!candidates || candidates.length === 0) {
+        logger.info('No candidate tokens found in this scan cycle (both GMGN and DexScreener failed).');
         return;
       }
 
@@ -28,7 +36,12 @@ class ScannerModule {
       const processingList = candidates.slice(0, 20);
 
       for (const token of processingList) {
-        let candles = await gmgnService.getCandles15m(token.address);
+        let candles = null;
+        try {
+          candles = await gmgnService.getCandles15m(token.address);
+        } catch (e) {
+          logger.warn(`GMGN candles failed for ${token.symbol}, trying OKX/Gecko...`);
+        }
         
         if (!candles || candles.length < 30) {
            candles = await okxService.getCandles15m(token.symbol);

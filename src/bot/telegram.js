@@ -41,12 +41,27 @@ class TeleBot {
       const chatId = msg.chat.id;
       if (!this.wallet) return this.sendMessage(chatId, 'Wallet address not configured.');
       
-      this.sendMessage(chatId, '🔄 Fetching portfolio...');
+      this.sendMessage(chatId, '🔄 Fetching portfolio (Verifying on-chain)...');
       try {
-        const holdings = await gmgnService.getWalletHoldings(this.wallet);
-        const text = formatter.formatPortfolioSummary(holdings);
+        const [gmgnHoldings, rpcTokens] = await Promise.all([
+          gmgnService.getWalletHoldings(this.wallet),
+          solanaService.getSPLTokenBalances(this.wallet)
+        ]);
+
+        // Merge price data from GMGN with accurate quantity from RPC
+        const refinedHoldings = gmgnHoldings.map(h => {
+          const onChain = rpcTokens.find(r => r.token_address === h.token_address);
+          return {
+            ...h,
+            balance: onChain ? parseFloat(onChain.balance) : h.balance,
+            usd_value: onChain ? (parseFloat(onChain.balance) * (h.price || 0)) : (h.usd_value || 0)
+          };
+        });
+
+        const text = formatter.formatPortfolioSummary(refinedHoldings);
         this.sendMessage(chatId, text, { parse_mode: 'Markdown' });
       } catch (e) {
+        logger.error('Portfolio command error:', e);
         this.sendMessage(chatId, '❌ Failed to fetch portfolio.');
       }
     });
@@ -55,27 +70,32 @@ class TeleBot {
       const chatId = msg.chat.id;
       if (!this.wallet) return this.sendMessage(chatId, 'Wallet address not configured.');
       
-      this.sendMessage(chatId, '🔄 Fetching balances from GMGN & On-Chain...');
+      this.sendMessage(chatId, '🔄 Fetching real-time balance via Helius RPC...');
       try {
-        const holdings = await gmgnService.getWalletHoldings(this.wallet);
-        let solBalance = 0;
+        const [solBalance, rpcTokens, gmgnHoldings] = await Promise.all([
+          solanaService.getSOLBalance(this.wallet),
+          solanaService.getSPLTokenBalances(this.wallet),
+          gmgnService.getWalletHoldings(this.wallet)
+        ]);
+
         let splUsd = 0;
-        
-        holdings.forEach(h => {
-          if (h.symbol === 'SOL') solBalance = h.balance;
-          splUsd += (h.usd_value || 0);
+        rpcTokens.forEach(r => {
+          const gmgnInfo = gmgnHoldings.find(h => h.token_address === r.token_address);
+          if (gmgnInfo && gmgnInfo.price) {
+            splUsd += (parseFloat(r.balance) * gmgnInfo.price);
+          }
         });
 
-        // Use Solana RPC for raw SPL counts as fallback info
-        const onChainTokens = await solanaService.getSPLTokenBalances(this.wallet);
+        const text = `💰 *WALLET BALANCE (Live RPC)*
+SOL Balance: ${solBalance.toFixed(4)}
+Token Accounts: ${rpcTokens.length}
+Est. Token Value: $${splUsd.toFixed(2)}
 
-        const text = `💰 *WALLET BALANCE*
-Tokens count (on-chain): ${onChainTokens.length}
-Est. Value (SPLs): $${splUsd.toFixed(2)}
-SOL: ${solBalance}`;
+_Price data handled by GMGN. Quantities verified by Helius._`;
 
         this.sendMessage(chatId, text, { parse_mode: 'Markdown' });
       } catch (e) {
+        logger.error('Balance command error:', e);
         this.sendMessage(chatId, '❌ Failed to fetch balance.');
       }
     });

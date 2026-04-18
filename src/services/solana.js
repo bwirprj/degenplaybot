@@ -43,6 +43,20 @@ class SolanaService {
   }
 
   /**
+   * Get native SOL balance
+   */
+  async getSOLBalance(walletAddress) {
+    try {
+      const pubkey = new PublicKey(walletAddress);
+      const balance = await connection.getBalance(pubkey);
+      return balance / 1e9; // lamports to SOL
+    } catch (error) {
+      logger.error('Solana RPC getSOLBalance error:', error.message);
+      return 0;
+    }
+  }
+
+  /**
    * Get recent signatures for the wallet (trade history approximation fallback)
    */
   async getRecentTransactions(walletAddress, limit = 10) {

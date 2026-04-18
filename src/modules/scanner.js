@@ -47,10 +47,10 @@ class ScannerModule {
         return;
       }
 
-      logger.info(`Scanner found ${candidates.length} candidates. Verifying technicals via GeckoTerminal...`);
+      logger.info(`Scanner found ${candidates.length} candidates. Verifying technicals for TOP 5...`);
 
       const validPicks = [];
-      const processingList = candidates.slice(0, 15); // Process fewer but better tokens
+      const processingList = candidates.slice(0, 5); // Focus only on top 5
 
       for (const token of processingList) {
         // Priority 1: GeckoTerminal (Most stable on VPS)

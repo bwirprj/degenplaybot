@@ -51,10 +51,11 @@ gmgnService.scanTokens = async () => [
 
 // Override Solana methods
 solanaService.getSOLBalance = async () => 1.5432;
-solanaService.getSPLTokenBalances = async () => [
-  { token_address: 'So11111111111111111111111111111111111111112', balance: '1.5432' },
-  { token_address: 'MEME123...', balance: '1000000.00' }
+solanaService.getAssetsByOwner = async () => [
+  { token_address: 'So11111111111111111111111111111111111111112', symbol: 'SOL', name: 'Solana', balance: 1.5432, price: 150 },
+  { token_address: 'MEME123...', symbol: 'MEME', name: 'Meme Token', balance: 1000000, price: 0.0001 }
 ];
+solanaService.getSPLTokenBalances = async () => solanaService.getAssetsByOwner();
 
 // --- INIT BOT ---
 const TeleBot = require('../src/bot/telegram');

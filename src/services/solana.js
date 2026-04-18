@@ -7,34 +7,43 @@ const RPC_URL = config.solana.heliusRpcUrl || 'https://api.mainnet-beta.solana.c
 const connection = new Connection(RPC_URL, 'confirmed');
 
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdqYm1zoThtU4t977M8XfD1sT4k7p8QToDj');
 
 class SolanaService {
   /**
-   * Get all SPL token balances for a wallet.
-   * This is used as a fallback if GMGN portfolio fetch fails.
+   * Get all SPL token balances (Legacy & Token-2022) for a wallet.
    */
   async getSPLTokenBalances(walletAddress) {
     try {
       const pubkey = new PublicKey(walletAddress);
-      const data = await connection.getParsedTokenAccountsByOwner(pubkey, {
-        programId: TOKEN_PROGRAM_ID,
-      });
+      
+      // Fetch both standard and 2022 tokens
+      const [legacyData, data2022] = await Promise.all([
+        connection.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_PROGRAM_ID }),
+        connection.getParsedTokenAccountsByOwner(pubkey, { programId: TOKEN_2022_PROGRAM_ID })
+      ]);
 
       const tokens = [];
-      data.value.forEach((accountInfo) => {
-        const parsedInfo = accountInfo.account.data.parsed.info;
-        const mintAddress = parsedInfo.mint;
-        const amount = parsedInfo.tokenAmount.uiAmountString;
-        const decimals = parsedInfo.tokenAmount.decimals;
+      const processAccounts = (data) => {
+        data.value.forEach((accountInfo) => {
+          const parsedInfo = accountInfo.account.data.parsed.info;
+          const mintAddress = parsedInfo.mint;
+          const amount = parsedInfo.tokenAmount.uiAmountString;
+          const decimals = parsedInfo.tokenAmount.decimals;
 
-        if (parseFloat(amount) > 0) {
-          tokens.push({
-            token_address: mintAddress,
-            balance: amount,
-            decimals: decimals
-          });
-        }
-      });
+          if (parseFloat(amount) > 0) {
+            tokens.push({
+              token_address: mintAddress,
+              balance: amount,
+              decimals: decimals
+            });
+          }
+        });
+      };
+
+      processAccounts(legacyData);
+      processAccounts(data2022);
+      
       return tokens;
     } catch (error) {
       logger.error('Solana RPC getSPLTokenBalances error:', error.message);

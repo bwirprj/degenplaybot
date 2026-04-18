@@ -28,6 +28,36 @@ teleBot.attachScanner(scannerModule);
 const defaultChatId = config.telegram.chatId;
 
 // 4. Setup Schedulers
+const PORTFOLIO_INTERVAL = 15; // minutes
+const SCANNER_INTERVAL = 30; // minutes
+
+// Helper to format countdown
+function getCountdown() {
+  const now = new Date();
+  const minutes = now.getMinutes();
+  const seconds = now.getSeconds();
+
+  const nextPortfolio = PORTFOLIO_INTERVAL - (minutes % PORTFOLIO_INTERVAL);
+  const nextScanner = SCANNER_INTERVAL - (minutes % SCANNER_INTERVAL);
+
+  const format = (m, s) => {
+    let remM = m - 1;
+    let remS = 60 - s;
+    if (remS === 60) {
+      remM += 1;
+      remS = 0;
+    }
+    return `${remM}m ${remS}s`;
+  };
+
+  return `manage ${format(nextPortfolio, seconds)} | screening ${format(nextScanner, seconds)}`;
+}
+
+// Ticker to show countdown in logs
+setInterval(() => {
+  console.log(`⏳ ${getCountdown()}`);
+}, 30000); // every 30 seconds
+
 // Portfolio: every 15 minutes
 cron.schedule('*/15 * * * *', async () => {
   try {
@@ -53,6 +83,7 @@ if (defaultChatId) {
   teleBot.sendMessage(defaultChatId, '🟢 *Degenplaybot started and schedulers active!*', { parse_mode: 'Markdown' });
 }
 logger.info('Degenplaybot running and waiting for cron triggers...');
+console.log(`⏳ ${getCountdown()}`);
 
 // Process exit handlers
 process.on('uncaughtException', (err) => {

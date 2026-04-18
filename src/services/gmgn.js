@@ -38,7 +38,7 @@ class GMGNService {
       });
       return response.data?.data?.holdings || [];
     } catch (error) {
-      logger.error('Error fetching GMGN wallet holdings:', error.message);
+      logger.debug('GMGN wallet holdings fetch failed (Silent):', error.message);
       return [];
     }
   }
@@ -57,7 +57,7 @@ class GMGNService {
       // Assuming response.data.data.candles is an array of { o, h, l, c, v, t }
       return response.data?.data?.candles || null;
     } catch (error) {
-      logger.error(`Error fetching GMGN candles for ${tokenAddress}:`, error.message);
+      logger.debug(`GMGN candles fetch failed (Silent) for ${tokenAddress}:`, error.message);
       return null;
     }
   }
@@ -80,7 +80,7 @@ class GMGNService {
       const tokens = response.data?.data?.rank || [];
       return tokens.filter(this._applyFilters);
     } catch (error) {
-      logger.error('Error fetching GMGN scanner tokens:', error.message);
+      logger.debug('GMGN scanner fetch failed (Silent):', error.message);
       return [];
     }
   }
@@ -95,7 +95,7 @@ class GMGNService {
       });
       return response.data?.data?.activities || [];
     } catch (error) {
-      logger.error('Error fetching GMGN wallet activity:', error.message);
+      logger.debug('GMGN wallet activity fetch failed (Silent):', error.message);
       return [];
     }
   }

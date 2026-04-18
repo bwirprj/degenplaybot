@@ -2,6 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const config = require('../config');
 const logger = require('../utils/logger');
 const gmgnService = require('../services/gmgn');
+const dexscreenerService = require('../services/dexscreener');
 const solanaService = require('../services/solana');
 const formatter = require('./formatter');
 
@@ -43,30 +44,39 @@ class TeleBot {
       
       this.sendMessage(chatId, '🔄 Fetching portfolio (Verified via Helius DAS)...');
       try {
-        // Helius DAS returns everything (Balance + Metadata)
+        // Helius DAS is our source of truth for assets
         const assets = await solanaService.getAssetsByOwner(this.wallet);
         
         if (assets.length === 0) {
           return this.sendMessage(chatId, '💼 *Your wallet appears to be empty or Helius DAS is syncing.*', { parse_mode: 'Markdown' });
         }
 
-        // Optional: Still try GMGN for PnL data, but don't fail if it 403s
+        // Silent PnL fetch from GMGN
         let gmgnHoldings = [];
         try {
           gmgnHoldings = await gmgnService.getWalletHoldings(this.wallet);
         } catch (e) {
-          logger.warn('GMGN Holdings fetch failed (403), using Helius DAS metadata.');
+          // Silent failure
         }
 
-        const displayHoldings = assets.map(a => {
+        // Enrich tokens with price from DexScreener if Helius is missing it
+        const displayHoldings = await Promise.all(assets.map(async (a) => {
+          let price = a.price || 0;
+          if (price === 0) {
+            const pair = await dexscreenerService.getTokenData(a.token_address);
+            if (pair) price = parseFloat(pair.priceUsd || 0);
+          }
+
           const gmgnInfo = gmgnHoldings.find(h => h.token_address === a.token_address);
+          
           return {
             ...a,
+            price: price,
+            usd_value: a.balance * price,
             unrealized_pnl_pct: gmgnInfo ? gmgnInfo.unrealized_pnl_pct : 0,
-            // Use Helius as lead for symbol/balance
             symbol: a.symbol || (gmgnInfo ? gmgnInfo.symbol : 'Unknown')
           };
-        });
+        }));
 
         const text = formatter.formatPortfolioSummary(displayHoldings);
         this.sendMessage(chatId, text, { parse_mode: 'Markdown' });

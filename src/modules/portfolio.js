@@ -1,4 +1,5 @@
 const gmgnService = require('../services/gmgn');
+const dexscreenerService = require('../services/dexscreener');
 const geckoTerminalService = require('../services/geckoterminal');
 const okxService = require('../services/okx');
 const solanaService = require('../services/solana');
@@ -32,10 +33,24 @@ class PortfolioModule {
 
       // 2. Iterate each token
       for (const holding of assets) {
+        // Priority 1: Use price from Helius DAS if present
+        let price = holding.price || 0;
+
+        // Priority 2: Try DexScreener if Helius price is 0
+        if (price === 0) {
+          const pair = await dexscreenerService.getTokenData(holding.token_address);
+          if (pair) {
+            price = parseFloat(pair.priceUsd || 0);
+          }
+        }
+
         const gmgnInfo = gmgnHoldings.find(h => h.token_address === holding.token_address);
         
+        // Final update to price
+        holding.price = price;
+
         // Skip tiny dust
-        if ((holding.balance * (holding.price || 0)) < 1) continue;
+        if ((holding.balance * price) < 1) continue;
 
         // Enrich with GMGN PnL if available
         if (gmgnInfo) {
@@ -44,22 +59,26 @@ class PortfolioModule {
 
         const tokenAddress = holding.token_address;
         
-        // Fetch OHLCV
-        let candles = await gmgnService.getCandles15m(tokenAddress);
+        // 3. Fetch OHLCV for indicators
+        // Priority 1: GeckoTerminal (Most stable on VPS)
+        let candles = await geckoTerminalService.getCandles15m(tokenAddress);
         
-        // Fallbacks
+        // Priority 2: OKX
         if (!candles || candles.length < 30) {
-          logger.warn(`GMGN candles failed/insufficient for ${holding.symbol}, fallback to OKX...`);
           candles = await okxService.getCandles15m(holding.symbol);
         }
         
+        // Priority 3: GMGN (Fallback)
         if (!candles || candles.length < 30) {
-          logger.warn(`OKX candles failed, fallback to GeckoTerminal pool for ${holding.symbol}...`);
-          candles = await geckoTerminalService.getCandles15m(tokenAddress);
+          try {
+            candles = await gmgnService.getCandles15m(tokenAddress);
+          } catch (e) {
+            // GMGN logic failure
+          }
         }
 
         if (!candles || candles.length < 30) {
-          logger.error(`Failed to get enough candles for ${holding.symbol}`);
+          logger.error(`Failed to get enough candles for ${holding.symbol} across all sources.`);
           continue;
         }
 

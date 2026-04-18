@@ -12,54 +12,86 @@ class ScannerModule {
   }
 
   async run(chatId) {
-    logger.info(`Starting scanner run`);
+    logger.info(`Starting high-efficiency scanner run`);
     try {
-      // 1. Get filtered tokens
-      let candidates = await gmgnService.scanTokens();
+      // 1. Get filtered tokens from high-efficiency sources
+      const [boosts, profiles] = await Promise.all([
+        dexscreenerService.getLatestBoosts(),
+        dexscreenerService.getLatestProfiles()
+      ]);
+
+      // Combine and unique by address
+      const candidatesMap = new Map();
+      [...boosts, ...profiles].forEach(t => {
+        if (!candidatesMap.has(t.address)) {
+          candidatesMap.set(t.address, t);
+        }
+      });
+
+      let candidates = Array.from(candidatesMap.values());
       
-      // Fallback to DexScreener if GMGN fails or returns nothing
-      if (!candidates || candidates.length === 0) {
-        logger.info('GMGN scanner failed or empty. Falling back to DexScreener trending...');
+      // Fallback to searching Trending Solana if boosts/profiles are empty
+      if (candidates.length === 0) {
+        logger.info('DexScreener Boosts/Profiles empty. Falling back to trending search...');
         candidates = await dexscreenerService.getTrendingTokens();
       }
 
-      if (!candidates || candidates.length === 0) {
-        logger.info('No candidate tokens found in this scan cycle (both GMGN and DexScreener failed).');
+      // Final fallback to GMGN
+      if (candidates.length === 0) {
+        logger.info('DexScreener sources empty. Falling back to GMGN...');
+        candidates = await gmgnService.scanTokens();
+      }
+
+      if (candidates.length === 0) {
+        logger.info('No candidate tokens found in this scan cycle.');
         return;
       }
 
-      logger.info(`Scanner found ${candidates.length} pre-filtered tokens. Checking StochRSI...`);
+      logger.info(`Scanner found ${candidates.length} candidates. Verifying technicals via GeckoTerminal...`);
 
       const validPicks = [];
-
-      // 2. Limit processing to top 20 candidates to avoid API rate limits
-      const processingList = candidates.slice(0, 20);
+      const processingList = candidates.slice(0, 15); // Process fewer but better tokens
 
       for (const token of processingList) {
-        let candles = null;
-        try {
-          candles = await gmgnService.getCandles15m(token.address);
-        } catch (e) {
-          logger.warn(`GMGN candles failed for ${token.symbol}, trying OKX/Gecko...`);
-        }
+        // Priority 1: GeckoTerminal (Most stable on VPS)
+        let candles = await geckoTerminalService.getCandles15m(token.address);
         
+        // Priority 2: OKX
         if (!candles || candles.length < 30) {
            candles = await okxService.getCandles15m(token.symbol);
         }
+
+        // Priority 3: GMGN (Fallback)
         if (!candles || candles.length < 30) {
-           candles = await geckoTerminalService.getCandles15m(token.address);
+          try {
+            candles = await gmgnService.getCandles15m(token.address);
+          } catch (e) {
+            // GMGN logic failure
+          }
         }
 
         if (!candles || candles.length < 30) continue;
 
         const result = stochRSI(candles);
+        
+        // Oversold signal (K < 30)
         if (result && result.k < 30) {
-          // Token is valid and Oversold
+          // If we don't have metadata yet (from boosts), fetch it
+          if (!token.symbol || token.symbol === 'Unknown') {
+            const pairData = await dexscreenerService.getTokenData(token.address);
+            if (pairData) {
+              token.symbol = pairData.baseToken?.symbol || 'Unknown';
+              token.name = pairData.baseToken?.name || 'Unknown';
+              token.marketcap = pairData.fdv || 0;
+              token.liquidity = pairData.liquidity?.usd || 0;
+              token.volume_1h = pairData.volume?.h1 || 0;
+            }
+          }
+
           token.stoch = result;
           validPicks.push(token);
         }
 
-        // Just need top 3
         if (validPicks.length >= 3) break;
       }
 
